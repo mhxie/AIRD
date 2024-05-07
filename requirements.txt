@@ -2,3 +2,4 @@ feedparser
 openai
 requests
 beautifulsoup4
+xxhash

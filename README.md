@@ -1,44 +1,88 @@
 # AIRD: Your Personal AI RSS Daily
 
-## Prerequisites
-You need to have python3 installed on your system.
-```
-pip3 install -r requirements.txt
-```
+AIRD (AI RSS Daily) is your personal assistant for staying up-to-date with the latest content from your favorite RSS feeds. Tailored specifically for those who want to optimize their information intake, AIRD filters and summarizes articles based on your interests, making sure you only spend time on content that matters most to you.
 
-## Configuration
+## Features
 
-```
-vi config.json
-```
+- **Interest-Based Filtering**: Specify your interest tags to get articles that are most relevant to you. AIRD uses these tags to filter RSS feed content, ensuring you only see articles that match your specified interests.
+- **Efficient Local Deduplication**: AIRD implements an advanced deduplication algorithm that runs locally. This means you won't be bothered by the same article more than once, even if you run AIRD frequently throughout the day.
+- **Summarization**: Get concise summaries of articles instead of reading the full text. AIRD utilizes state-of-the-art AI to provide you with the gist of each article, saving you time.
+- **Customizable Output**: Choose how you want to view your summarized content. AIRD supports output in both plain text and Markdown, making it easy to read or share your daily digest in your preferred format.
+- **Secure and Private**: Your RSS feed subscriptions and interest tags are stored locally on your device. AIRD values your privacy and ensures that your data never leaves your computer.
 
-Your config.json should look like this:
-```json
-{
-    "rss_urls": [
-        "https://example.com/rss",
-    ],
-    "interest_tags": [
-        "AI",
-    ]
-}
+## Getting Started
 
-```
+### Prerequisites
 
-## Execution
+Before you start using AIRD, make sure you have the following installed on your machine:
+- Python 3.6 or later
+- Required Python packages: `feedparser`, `requests`, `beautifulsoup4`, `openai`, and `xxhash`.
 
-```
-python3 run.py
+### Installation
+
+1. Clone the AIRD repository to your local machine:
+
+```bash
+git clone https://github.com/your-github/aird.git
 ```
 
-## Read
-Your new daily will be saved under `daily_base_path` folder.
+2. Navigate to the AIRD directory:
 
-## Future Work
-- Support efficient deduplication
-- Better link reader
-- Better configuration system (instead of hardcoding)
-- Higher concurrency
-- Support github actions
-- Auto tagging and categorization
-- Performance optimization
+```bash
+cd aird
+```
+
+3. Install the required Python packages:
+
+```bash
+pip install -r requirements.txt
+```
+
+### Configuration
+
+To tailor AIRD to your preferences, edit the `config.json` file. Here's a quick overview of key settings:
+
+- **gpt_model**: GPT model version, default is "gpt-4".
+- **language**: Summary language, set to "中文" for Chinese.
+- **batch_size**: Number of articles processed per batch.
+- **max_tokens**: Max number of tokens for each summary.
+- **api_key**: Your OpenAI API key.
+- **daily_base_path**: Directory for saving daily summaries.
+- **db_path**: Database file path for deduplication.
+- **unused**: List of unused RSS feed URLs.
+- **rss_urls**: Active RSS feed URLs.
+- **interest_tags**: Your interest tags for article filtering.
+
+
+### Running AIRD
+
+To start AIRD, simply run the following command in your terminal:
+
+```bash
+python run.py
+```
+
+AIRD will fetch articles from your specified RSS feeds, filter them based on your interest tags, deduplicate, summarize, and then save the summaries in a file for your review.
+
+## Future Works
+
+AIRD is committed to continuous improvement and expansion. Here's a shortlist of planned enhancements:
+
+- **Better Link Reader**: Improving the mechanism for fetching and interpreting article content from various RSS feeds.
+- **Enhanced Configuration System**: Moving away from hardcoded configurations to a more dynamic and user-friendly setup process.
+- **Higher Concurrency**: Implementing more concurrent processing to handle multiple feeds and operations simultaneously, enhancing efficiency.
+- **GitHub Actions Support**: Integrating with GitHub Actions for automated runs, making AIRD more accessible and easier to deploy.
+- **Auto Tagging and Categorization**: Developing AI-driven features to automatically tag and categorize articles, refining content relevance.
+- **Performance Optimization**: Continual efforts to optimize code and processes for faster execution and lower resource consumption.
+
+## Contributing
+
+Contributions to AIRD are welcome! If you have suggestions for improvements or new features, feel free to open an issue or submit a pull request.
+
+## License
+
+AIRD is released under the MIT License. See the LICENSE file for more details.
+
+---
+
+Enjoy your personalized AI-powered RSS digest with AIRD – Your gateway to efficient and focused content consumption!

@@ -6,6 +6,8 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 import re
+import shelve
+import xxhash
 
 
 def load_config(config_path="config.json"):
@@ -15,23 +17,22 @@ def load_config(config_path="config.json"):
     return config
 
 
-# Example usage within your script
-config = load_config()
-rss_urls = config["rss_urls"]
-interest_tags = config["interest_tags"]
+try:
+    config = load_config()
+    rss_urls = config["rss_urls"]
+    interest_tags = config["interest_tags"]
+    GPT_MODEL = config["gpt_model"]
+    RET_LANGUAGE = config["language"]
+    BSIZE = config["batch_size"]
+    MAX_TOKENS = config["max_tokens"]
+    MYKEY = config["api_key"]
+    daily_base_path = config["daily_base_path"]
+    db_path = config["db_path"]
+except KeyError:
+    print("Configuration file is missing required fields.")
+    exit(1)
 # Adjust this regex pattern to match your ID format if necessary
-id_pattern = re.compile(
-    r"^\d+:\s"
-)
-
-MYKEY = os.environ.get("OPENAI_API_KEY")
-GPT_MODEL = "gpt-4"  # Update this with your preferred model
-RET_LANGUAGE = "中文"  # Update this with your preferred language
-BSIZE = 20
-
-# Path to save the summaries and logs
-daily_base_path = "daily"
-log_path = "log.txt"
+id_pattern = re.compile(r"^\d+:\s")
 
 
 def fetch_article_content(url):
@@ -40,7 +41,6 @@ def fetch_article_content(url):
         response = requests.get(url)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, "html.parser")
-        # This is a simplified example. You'll need to adjust the selector based on the actual HTML structure of the webpage.
         article_text = soup.get_text(strip=True)
         return article_text
     except Exception as e:
@@ -65,15 +65,27 @@ def fetch_rss_articles(urls):
     return articles
 
 
-def filter_new_articles(articles, log_path):
+def hash_title(title):
+    """Hashes the title using the xxHash algorithm."""
+    return xxhash.xxh64(title).hexdigest()
+
+
+def store_hashed_titles(articles, db_path="hashed_titles.db"):
+    """store hashed titles in a shelve database"""
+    with shelve.open(db_path) as db:
+        for article in articles:
+            hashed_title = hash_title(article["title"])
+            db[hashed_title] = article["title"]
+
+
+def filter_new_articles(articles, db_path="hashed_titles.db"):
     """Filters out articles that have already been logged."""
-    if not os.path.exists(log_path):
-        return articles  # If no log exists, all articles are new
-    with open(log_path, "r") as log_file:
-        logged_titles = [json.loads(line)["title"] for line in log_file]
-    new_articles = [
-        article for article in articles if article["title"] not in logged_titles
-    ]
+    new_articles = []
+    with shelve.open(db_path) as db:
+        for article in articles:
+            hashed_title = hash_title(article["title"])
+            if hashed_title not in db:
+                new_articles.append(article)
     return new_articles
 
 
@@ -145,56 +157,49 @@ def filter_by_interest(articles, interest_tags):
     return interested_articles
 
 
-def generate_summary_and_log(articles, summary_path, log_path):
+def generate_summary(articles, summary_path):
     """Generates summaries for the given articles and logs the titles."""
     client = OpenAI(api_key=MYKEY)
     summaries = []
 
-    with open(
-        log_path, "a", encoding="utf-8"
-    ) as log_file:  # Ensure file is opened with UTF-8 encoding
-        for article in articles:
-            # Use ensure_ascii=False to write non-ASCII characters directly
-            log_entry = json.dumps(
-                {"title": article["title"], "date": datetime.now().isoformat()},
-                ensure_ascii=False,
-            )
-            log_file.write(log_entry + "\n")
+    for article in articles:
+        # Fetch full article content if 'summary' is not sufficient
+        article_content = (
+            fetch_article_content(article["link"])
+            if "查看全文" in article["summary"]
+            else article["summary"]
+        )
 
-            # Fetch full article content if 'summary' is not sufficient
-            article_content = (
-                fetch_article_content(article["link"])
-                if "查看全文" in article["summary"]
-                else article["summary"]
+        try:
+            response = client.chat.completions.create(
+                model=GPT_MODEL,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a smart assistant that summarizes articles. Your summary will be only written in {RET_LANGUAGE}.",
+                    },
+                    {
+                        "role": "user",
+                        "content": "Exclude any references to author publicity and promotion and the summary should be straightforward within 50 to 200 characters in {RET_LANGUAGE}. Summarize the following:"
+                        + article_content,
+                    },
+                ],
+                temperature=0.7,
+            )
+            summary_text = response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"An error occurred while summarizing the article: {e}")
+            summary_text = (
+                article_content  # Fallback to original content if the API call fails
             )
 
-            try:
-                response = client.chat.completions.create(
-                    model=GPT_MODEL,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "You are a smart assistant that summarizes articles. Your summary will be only written in {RET_LANGUAGE}.",
-                        },
-                        {
-                            "role": "user",
-                            "content": "Exclude any references to author publicity and promotion and the summary should be straightforward within 50 to 200 characters in {RET_LANGUAGE}. Summarize the following:"
-                            + article_content,
-                        },
-                    ],
-                    temperature=0.7,
-                )
-                summary_text = response.choices[0].message.content.strip()
-            except Exception as e:
-                print(f"An error occurred while summarizing the article: {e}")
-                summary_text = article_content  # Fallback to original content if the API call fails
-
-            summaries.append(
-                f"### {article['title']}\n\n- **链接**: [{article['link']}]({article['link']})\n- **摘要**: {summary_text}\n\n"
-            )
+        summaries.append(
+            f"### {article['title']}\n\n- **链接**: [{article['link']}]({article['link']})\n- **摘要**: {summary_text}\n\n"
+        )
 
     summary_content = "\n".join(summaries)
-    with open(summary_path, "w") as summary_file:
+    # append the summary to the daily summary file
+    with open(summary_path, "a") as summary_file:
         summary_file.write(summary_content)
 
     return summary_content
@@ -202,27 +207,36 @@ def generate_summary_and_log(articles, summary_path, log_path):
 
 def main():
     articles = fetch_rss_articles(rss_urls)
-    new_articles = filter_new_articles(articles, log_path)
+    new_articles = filter_new_articles(articles, db_path)
     if not new_articles:
         print("No new articles found.")
         return
+    store_hashed_titles(articles, db_path)
+
     interested_articles = filter_by_interest(new_articles, interest_tags)
     num_articles = len(interested_articles)
     if num_articles > 20:
-        print(
-            "Too many articles ({num_articles}) matched the interest tags. Please narrow down the interest tags."
-        )
-        # interested_articles = interested_articles[:10]
-    if not interested_articles:
+        print(f"Too many articles ({num_articles}) matched the interest tags.")
+        try:
+            num_to_process = int(input("Enter the number of articles to process: "))
+            if 0 < num_to_process <= num_articles:
+                interested_articles = interested_articles[:num_to_process]
+            else:
+                print(f"Please enter a number between 1 and {num_articles}.")
+        except ValueError:
+            print("Please enter a valid number. Program exited, please run again.")
+            return
+    elif num_articles == 0:
         print("No articles matched the interest tags.")
         return
-    today = datetime.now().strftime("%Y-%m-%d")
+    else:
+        print(f"{num_articles} articles matched the interest tags.")
 
+    today = datetime.now().strftime("%Y-%m-%d")
     os.makedirs(daily_base_path, exist_ok=True)
+
     summary_path = f"{daily_base_path}/{today}.md"
-    summary_content = generate_summary_and_log(
-        interested_articles, summary_path, log_path
-    )
+    summary_content = generate_summary(interested_articles, summary_path)
     print(f"Daily summary generated and saved to {summary_path}")
 
 
