@@ -2,12 +2,14 @@ import feedparser
 from openai import OpenAI
 import os
 import json
+import time
 from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 import re
 import shelve
 import xxhash
+import ollama
 
 
 def load_config(config_path="config.json"):
@@ -21,13 +23,11 @@ try:
     config = load_config()
     rss_urls = config["rss_urls"]
     interest_tags = config["interest_tags"]
-    GPT_MODEL = config["gpt_model"]
-    RET_LANGUAGE = config["language"]
-    BSIZE = config["batch_size"]
-    MAX_TOKENS = config["max_tokens"]
-    MYKEY = config["api_key"]
-    daily_base_path = config["daily_base_path"]
-    db_path = config["db_path"]
+    # LLM_MODEL = "llama3"
+    LLM_MODEL = "qwen:7b"
+    BSIZE = 5
+    daily_base_path = "ollama_daily"
+    db_path = "ollama_history_titles"
 except KeyError:
     print("Configuration file is missing required fields.")
     exit(1)
@@ -105,13 +105,12 @@ def extract_ids_from_response(response_text):
 
 
 def filter_by_interest(articles, interest_tags):
-    """Filters articles based on the user's interest tags. s"""
+    """Filters articles based on the user's interest tags."""
 
     def chunked_iterable(iterable, size):
         for i in range(0, len(iterable), size):
             yield iterable[i : i + size]
 
-    client = OpenAI(api_key=MYKEY)
     interested_articles = []
 
     # Prepare a mapping of title IDs to articles
@@ -120,23 +119,24 @@ def filter_by_interest(articles, interest_tags):
     for titles_chunk in chunked_iterable(list(title_id_map.keys()), BSIZE):
         prompt_titles = [f"{id}: {title_id_map[id]['title']}" for id in titles_chunk]
         print(f"Titles: {prompt_titles}")
-        prompt = "Filter titles by interest tags: {}\n\nTitles:\n{}\n".format(
-            interest_tags, "\n".join(prompt_titles)
-        )
+        messages = [
+            {
+                "role": "user",
+                "content": (
+                    "Please filter the news titles based on interest tags: {}\n\n"
+                    "Here are titles: \n{}\n\n"
+                    "Please return unordered list of titles"
+                ).format(interest_tags, "\n".join(prompt_titles)),
+            }
+        ]
 
         try:
-            response = client.chat.completions.create(
-                model=GPT_MODEL,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a smart assistant that filters article titles based on the user's interest tags.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.3,
+            response = ollama.chat(
+                model=LLM_MODEL,
+                messages=messages,
             )
-            interested_ids_text = response.choices[0].message.content.strip()
+            interested_ids_text = response["message"]["content"].strip()
+            print(f"Interested IDs text: {interested_ids_text}")
         except Exception as e:
             print(f"An error occurred: {e}")
             continue
@@ -144,12 +144,10 @@ def filter_by_interest(articles, interest_tags):
         interested_ids = extract_ids_from_response(interested_ids_text)
         print(f"Interested IDs: {interested_ids}")
 
-        # Continue with filtering articles based on the extracted interested IDs
         interested_articles.extend(
             title_id_map[id] for id in interested_ids if id in title_id_map
         )
 
-    # Ensure uniqueness in case of overlapping interest matches
     interested_articles = list(
         {article["id"]: article for article in interested_articles}.values()
     )
@@ -157,36 +155,36 @@ def filter_by_interest(articles, interest_tags):
     return interested_articles
 
 
-def generate_summary(articles, summary_path):
+def generate_summary(articles, summary_path, interest_tags):
     """Generates summaries for the given articles and logs the titles."""
-    client = OpenAI(api_key=MYKEY)
+    last_time = time.time()
     summaries = []
 
-    for article in articles:
-        # Fetch full article content if 'summary' is not sufficient
+    for i, article in enumerate(articles):
         article_content = (
             fetch_article_content(article["link"])
             if "查看全文" in article["summary"]
             else article["summary"]
         )
 
+        messages = [
+            {
+                "role": "user",
+                "content": (
+                    f"请排除掉与兴趣标签无关的新闻：{interest_tags}\n"
+                    f"并且排除任何作者宣传和推广的引用\n"
+                    f"摘要应该简洁明了，长度在50到200个字符之间\n"
+                    f"请对以下内容进行总结：{article_content}"
+                ),
+            }
+        ]
+
         try:
-            response = client.chat.completions.create(
-                model=GPT_MODEL,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a smart assistant that summarizes articles. Your summary will be only written in {RET_LANGUAGE}.",
-                    },
-                    {
-                        "role": "user",
-                        "content": "Exclude any references to author publicity and promotion and the summary should be straightforward within 50 to 200 characters in {RET_LANGUAGE}. Summarize the following:"
-                        + article_content,
-                    },
-                ],
-                temperature=0.7,
+            response = ollama.chat(
+                model=LLM_MODEL,
+                messages=messages,
             )
-            summary_text = response.choices[0].message.content.strip()
+            summary_text = response["message"]["content"].strip()
         except Exception as e:
             print(f"An error occurred while summarizing the article: {e}")
             summary_text = (
@@ -196,13 +194,17 @@ def generate_summary(articles, summary_path):
         summaries.append(
             f"### {article['title']}\n\n- **链接**: [{article['link']}]({article['link']})\n- **摘要**: {summary_text}\n\n"
         )
-
+        if (i + 1) % BSIZE == 0:
+            print(f"Processed {i + 1}/{len(articles)} articles.")
+            print(f"Each article took {(time.time() - last_time)/BSIZE:.1f} seconds.")
+            last_time = time.time()
+            summary_content = "\n".join(summaries)
+            with open(summary_path, "a") as summary_file:
+                summary_file.write(summary_content)
+            summaries = []
     summary_content = "\n".join(summaries)
-    # append the summary to the daily summary file
     with open(summary_path, "a") as summary_file:
         summary_file.write(summary_content)
-
-    return summary_content
 
 
 def main():
@@ -213,30 +215,33 @@ def main():
         return
     store_hashed_titles(articles, db_path)
 
-    interested_articles = filter_by_interest(new_articles, interest_tags)
-    num_articles = len(interested_articles)
-    if num_articles > 20:
-        print(f"Too many articles ({num_articles}) matched the interest tags.")
-        try:
-            num_to_process = int(input("Enter the number of articles to process: "))
-            if 0 < num_to_process <= num_articles:
-                interested_articles = interested_articles[:num_to_process]
-            else:
-                print(f"Please enter a number between 1 and {num_articles}.")
-        except ValueError:
-            print("Please enter a valid number. Program exited, please run again.")
-            return
-    elif num_articles == 0:
-        print("No articles matched the interest tags.")
-        return
-    else:
-        print(f"{num_articles} articles matched the interest tags.")
+    # prefilter not working for now
+    # interested_articles = filter_by_interest(new_articles, interest_tags)
+
+    interested_articles = new_articles
+    # num_articles = len(interested_articles)
+    # if num_articles > 100:
+    #     print(f"Too many articles ({num_articles}) matched the interest tags.")
+    #     try:
+    #         num_to_process = int(input("Enter the number of articles to process: "))
+    #         if 0 < num_to_process <= num_articles:
+    #             interested_articles = interested_articles[:num_to_process]
+    #         else:
+    #             print(f"Please enter a number between 1 and {num_articles}.")
+    #     except ValueError:
+    #         print("Please enter a valid number. Program exited, please run again.")
+    #         return
+    # elif num_articles == 0:
+    #     print("No articles matched the interest tags.")
+    #     return
+    # else:
+    #     print(f"{num_articles} articles matched the interest tags.")
 
     today = datetime.now().strftime("%Y-%m-%d")
     os.makedirs(daily_base_path, exist_ok=True)
 
     summary_path = f"{daily_base_path}/{today}.md"
-    summary_content = generate_summary(interested_articles, summary_path)
+    generate_summary(interested_articles, summary_path, interest_tags)
     print(f"Daily summary generated and saved to {summary_path}")
 
 
