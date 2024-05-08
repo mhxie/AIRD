@@ -130,7 +130,12 @@ def filter_by_interest(articles, interest_tags):
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a smart assistant that filters article titles based on the user's interest tags.",
+                        "content": (
+                            "You are a smart assistant that filters article titles "
+                            "based on the user's interest tags. Specifically, you should exclude "
+                            "titles that are advertisements, including promotions, sales, "
+                            "sponsored content, and any other form of paid content."
+                        ),
                     },
                     {"role": "user", "content": prompt},
                 ],
@@ -176,12 +181,16 @@ def generate_summary(articles, summary_path):
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a smart assistant that summarizes articles. Your summary will be only written in {RET_LANGUAGE}.",
+                        "content": "You are a smart assistant that summarizes articles",
                     },
                     {
                         "role": "user",
-                        "content": "Exclude any references to author publicity and promotion and the summary should be straightforward within 50 to 200 characters in {RET_LANGUAGE}. Summarize the following:"
-                        + article_content,
+                        "content": (
+                            f"Exclude any references to author publicity and promotion and "
+                            f"the summary should be straightforward within 50 to 200 characters"
+                            f" in {RET_LANGUAGE}. Summarize the following:"
+                            + article_content
+                        ),
                     },
                 ],
                 temperature=0.7,
@@ -189,9 +198,7 @@ def generate_summary(articles, summary_path):
             summary_text = response.choices[0].message.content.strip()
         except Exception as e:
             print(f"An error occurred while summarizing the article: {e}")
-            summary_text = (
-                article_content  # Fallback to original content if the API call fails
-            )
+            summary_text = article_content
 
         summaries.append(
             f"### {article['title']}\n\n- **链接**: [{article['link']}]({article['link']})\n- **摘要**: {summary_text}\n\n"
