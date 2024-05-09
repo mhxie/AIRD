@@ -2,12 +2,15 @@ import feedparser
 from openai import OpenAI
 import os
 import json
+import time
 from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 import re
 import shelve
 import xxhash
+import threading
+from queue import Queue
 
 
 def load_config(config_path="config.json"):
@@ -21,9 +24,11 @@ try:
     config = load_config()
     rss_urls = config["rss_urls"]
     interest_tags = config["interest_tags"]
-    GPT_MODEL = config["gpt_model"]
+    FILTER_MODEL = config["filter_model"]
+    SUMMARY_MODEL = config["summary_model"]
     RET_LANGUAGE = config["language"]
     BSIZE = config["batch_size"]
+    PSIZE = config["process_size"]
     MAX_TOKENS = config["max_tokens"]
     MYKEY = config["api_key"]
     daily_base_path = config["daily_base_path"]
@@ -51,17 +56,19 @@ def fetch_article_content(url):
 def fetch_rss_articles(urls):
     """Fetches articles from the given RSS feed URLs."""
     articles = []
+    count = 0
     for url in urls:
         feed = feedparser.parse(url)
-        for index, entry in enumerate(feed.entries):
+        for entry in feed.entries:
             articles.append(
                 {
-                    "id": index,
+                    "id": count,
                     "title": entry.title,
                     "link": entry.link,
                     "summary": entry.summary,
                 }
             )
+            count += 1
     return articles
 
 
@@ -70,7 +77,7 @@ def hash_title(title):
     return xxhash.xxh64(title).hexdigest()
 
 
-def store_hashed_titles(articles, db_path="hashed_titles.db"):
+def store_hashed_titles(articles, db_path="hashed_titles"):
     """store hashed titles in a shelve database"""
     with shelve.open(db_path) as db:
         for article in articles:
@@ -78,7 +85,7 @@ def store_hashed_titles(articles, db_path="hashed_titles.db"):
             db[hashed_title] = article["title"]
 
 
-def filter_new_articles(articles, db_path="hashed_titles.db"):
+def filter_new_articles(articles, db_path="hashed_titles"):
     """Filters out articles that have already been logged."""
     new_articles = []
     with shelve.open(db_path) as db:
@@ -86,6 +93,7 @@ def filter_new_articles(articles, db_path="hashed_titles.db"):
             hashed_title = hash_title(article["title"])
             if hashed_title not in db:
                 new_articles.append(article)
+    print(f"Removed {len(articles) - len(new_articles)} old articles.")
     return new_articles
 
 
@@ -126,7 +134,7 @@ def filter_by_interest(articles, interest_tags):
 
         try:
             response = client.chat.completions.create(
-                model=GPT_MODEL,
+                model=FILTER_MODEL,
                 messages=[
                     {
                         "role": "system",
@@ -162,22 +170,22 @@ def filter_by_interest(articles, interest_tags):
     return interested_articles
 
 
-def generate_summary(articles, summary_path):
-    """Generates summaries for the given articles and logs the titles."""
+def process_batch(tid, batch, summary_queue):
+    """Processes a batch of articles and generates summaries."""
     client = OpenAI(api_key=MYKEY)
     summaries = []
 
-    for article in articles:
-        # Fetch full article content if 'summary' is not sufficient
+    print(f"T-{tid}: started processing a new batch...")
+    start_t = time.time()
+    for article in batch:
         article_content = (
             fetch_article_content(article["link"])
             if "查看全文" in article["summary"]
             else article["summary"]
         )
-
         try:
             response = client.chat.completions.create(
-                model=GPT_MODEL,
+                model=SUMMARY_MODEL,
                 messages=[
                     {
                         "role": "system",
@@ -187,8 +195,8 @@ def generate_summary(articles, summary_path):
                         "role": "user",
                         "content": (
                             f"Exclude any references to author publicity and promotion and "
-                            f"the summary should be straightforward within 50 to 200 characters"
-                            f" in {RET_LANGUAGE}. Summarize the following:"
+                            f"the summary should be straightforward within 50 to 200 characters "
+                            f"in {RET_LANGUAGE}. Summarize the following:"
                             + article_content
                         ),
                     },
@@ -203,9 +211,36 @@ def generate_summary(articles, summary_path):
         summaries.append(
             f"### {article['title']}\n\n- **链接**: [{article['link']}]({article['link']})\n- **摘要**: {summary_text}\n\n"
         )
+    print(
+        f"T-{tid}: {len(batch)} articles summarized in {time.time() - start_t:.2f} seconds."
+    )
+    summary_queue.put(summaries)
+
+
+def generate_summary(articles, summary_path):
+    """Generates summaries for the given articles and logs the titles."""
+    summary_queue = Queue()
+    threads = []
+
+    tid = 0
+    for i in range(0, len(articles), PSIZE):
+        batch = articles[i : i + PSIZE]
+        thread = threading.Thread(
+            target=process_batch,
+            args=(tid, batch, summary_queue),
+        )
+        threads.append(thread)
+        thread.start()
+        tid += 1
+
+    for thread in threads:
+        thread.join()
+
+    summaries = []
+    while not summary_queue.empty():
+        summaries.extend(summary_queue.get())
 
     summary_content = "\n".join(summaries)
-    # append the summary to the daily summary file
     with open(summary_path, "a") as summary_file:
         summary_file.write(summary_content)
 
@@ -239,6 +274,7 @@ def main():
     else:
         print(f"{num_articles} articles matched the interest tags.")
 
+    assert len(interested_articles) / PSIZE <= 16, "We only support 16 threads at most."
     today = datetime.now().strftime("%Y-%m-%d")
     os.makedirs(daily_base_path, exist_ok=True)
 

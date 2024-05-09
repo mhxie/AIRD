@@ -42,14 +42,15 @@ pip install -r requirements.txt
 
 To tailor AIRD to your preferences, edit the `config.json` file. Here's a quick overview of key settings:
 
-- **gpt_model**: GPT model version, default is "gpt-4".
-- **language**: Summary language, set to "中文" for Chinese.
-- **batch_size**: Number of articles processed per batch.
+- **filter_model**: GPT model version for interest filter.
+- **summary_model**: GPT model version for article summarization.
+- **language**: Summary language, e.g. set to "中文" for Chinese.
+- **batch_size**: Number of articles to be filtered per batch.
+- **process_size**: Number of articles to be summarized per batch.
 - **max_tokens**: Max number of tokens for each summary.
 - **api_key**: Your OpenAI API key.
 - **daily_base_path**: Directory for saving daily summaries.
 - **db_path**: Database file path for deduplication.
-- **unused**: List of unused RSS feed URLs.
 - **rss_urls**: Active RSS feed URLs.
 - **interest_tags**: Your interest tags for article filtering.
 
@@ -68,12 +69,12 @@ AIRD will fetch articles from your specified RSS feeds, filter them based on you
 
 AIRD is committed to continuous improvement and expansion. Here's a shortlist of planned enhancements:
 
-- **Better Link Reader**: Improving the mechanism for fetching and interpreting article content from various RSS feeds.
-- **Enhanced Configuration System**: Moving away from hardcoded configurations to a more dynamic and user-friendly setup process.
-- **Higher Concurrency**: Implementing more concurrent processing to handle multiple feeds and operations simultaneously, enhancing efficiency.
-- **GitHub Actions Support**: Integrating with GitHub Actions for automated runs, making AIRD more accessible and easier to deploy.
-- **Auto Tagging and Categorization**: Developing AI-driven features to automatically tag and categorize articles, refining content relevance.
-- **Performance Optimization**: Continual efforts to optimize code and processes for faster execution and lower resource consumption.
+- [ ] **Better Link Reader**: Improving the mechanism for fetching and interpreting article content from various RSS feeds.
+- [ ] **Enhanced Configuration System**: Moving away from hardcoded configurations to a more dynamic and user-friendly setup process.
+- [x] **Higher Concurrency**: Implementing more concurrent processing to handle multiple feeds and operations simultaneously, enhancing efficiency.
+- [ ] **GitHub Actions Support**: Integrating with GitHub Actions for automated runs, making AIRD more accessible and easier to deploy.
+- [ ] **Auto Tagging and Categorization**: Developing AI-driven features to automatically tag and categorize articles, refining content relevance.
+- [ ] **Performance Optimization**: Continual efforts to optimize code and processes for faster execution and lower resource consumption.
 
 ## Contributing
 
