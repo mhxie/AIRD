@@ -55,21 +55,64 @@ def fetch_article_content(url):
         return ""
 
 
+def find_the_first_image(description):
+    """Finds the first image URL in the feed entry description."""
+    img_urls = re.findall(r'<img src="(.*?)"', description)
+    if img_urls:
+        return img_urls[0]
+    return None
+
+
+def clean_html_content(html_content):
+    """Removes unnecessary HTML elements from the content."""
+    soup = BeautifulSoup(html_content, "lxml")
+
+    for script_or_style in soup(["script", "style"]):
+        script_or_style.decompose()
+
+    text = soup.get_text()
+
+    lines = (line.strip() for line in text.splitlines())
+    chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+    text = "\n".join(chunk for chunk in chunks if chunk)
+    return text
+
+
 def fetch_rss_articles(urls):
     """Fetches articles from the given RSS feed URLs."""
     articles = []
     count = 0
     for url in urls:
+        print(f"Fetching articles from {url}...")
         feed = feedparser.parse(url)
+        if feed.bozo:
+            print(f"Error fetching articles from {url}: {feed.bozo_exception}")
+            continue
+
         for entry in feed.entries:
-            articles.append(
-                {
-                    "id": count,
-                    "title": entry.title,
-                    "link": entry.link,
-                    "summary": entry.summary,
-                }
-            )
+            article = {
+                "id": count,
+                "title": entry.title,
+                "link": entry.link,
+                "published": entry.get("published", ""),
+                "updated": entry.get("updated", ""),
+                "content": "",
+                "image": "",
+            }
+
+            # If 'content' is an array, merge all elements into a single string
+            if hasattr(entry, "content") and isinstance(entry.content, list):
+                content_merged = "".join([item.value for item in entry.content])
+                article["content"] = content_merged
+            elif hasattr(entry, "description"):
+                article["content"] = entry.description
+
+            # Clean the HTML content
+            article["content"] = clean_html_content(article["content"])
+            # Extracting the first image from the content
+            article["image"] = find_the_first_image(article["content"])
+
+            articles.append(article)
             count += 1
     return articles
 
@@ -176,23 +219,33 @@ def process_batch(tid, batch, summary_queue):
     """Processes a batch of articles and generates summaries."""
     client = OpenAI(api_key=MYKEY)
     summaries = []
+    skipped_count = 0
 
     print(f"T-{tid}: started processing a new batch...")
     start_t = time.time()
     for article in batch:
         article_content = (
             fetch_article_content(article["link"])
-            if "查看全文" in article["summary"]
-            else article["summary"]
+            if "查看全文" in article["content"]
+            else article["content"]
         )
+        if len(article_content) < 200:
+            summary = (
+                f"### {article['title']}\n\n"
+                f"- **链接**: [{article['link']}]({article['link']})\n"
+                f"- **短文**: {article_content}\n"
+            )
+            if article["image"]:
+                summary += f"- **图片**: ![]({article['image']})\n\n"
+            summaries.append(summary)
+            skipped_count += 1
+            continue
         prompt_message = (
-            "You are a smart assistant that summarizes articles and finds the most relevant photo. "
-            "First, exclude any references to author publicity and promotion. The summary should be straightforward, "
-            "concise, within 50 to 200 characters in {RET_LANGUAGE}. Then, find a photo that best represents the main theme "
-            "or subject of the article. Return the summary and the photo link in Markdown format. "
-            "Summarize the following and include a relevant photo link:"
-            + article_content
+            "Exclude any references to author publicity and promotion and "
+            "the summary should be straightforward within 50 to 200 characters "
+            f"in {RET_LANGUAGE}."
         )
+
         attempt = 0
         while attempt < 3:
             try:
@@ -212,8 +265,16 @@ def process_batch(tid, batch, summary_queue):
                 )
                 summary_text = response.choices[0].message.content.strip()
                 break
-            except openai.error.RateLimitError:
-                time2sleep = random.randint(5, 10)
+            except openai.BadRequestError:
+                print(
+                    f"T-{tid}: Bad request error, skipping the article and using the original content."
+                )
+                summary_text = article_content[:200]
+                print(f"The malfunctioning prompt: {prompt_message}")
+                skipped_count += 1
+                break
+            except openai.RateLimitError:
+                time2sleep = random.randint(1, 10)
                 print(
                     f"T-{tid}: Rate limit exceeded, waiting {time2sleep} seconds to retry..."
                 )
@@ -224,13 +285,19 @@ def process_batch(tid, batch, summary_queue):
                     f"An error occurred while summarizing the article: {e}, using the original content."
                 )
                 summary_text = "Failed to summarize the article."
+                skipped_count += 1
                 break
 
-        summaries.append(
-            f"### {article['title']}\n\n- **链接**: [{article['link']}]({article['link']})\n- **摘要**: {summary_text}\n\n"
+        summary = (
+            f"### {article['title']}\n\n"
+            f"- **链接**: [{article['link']}]({article['link']})\n"
+            f"- **摘要**: {summary_text}\n"
         )
+        if article["image"]:
+            summary += f"- **图片**: ![]({article['image']})\n\n"
+        summaries.append(summary)
     print(
-        f"T-{tid}: {len(batch)} articles summarized in {time.time() - start_t:.2f} seconds."
+        f"T-{tid}: {len(batch)} articles (skipped: {skipped_count}) summarized in {time.time() - start_t:.2f} seconds."
     )
     summary_queue.put(summaries)
 
