@@ -63,7 +63,6 @@ To start AIRD, simply run the following command in your terminal:
 python run.py
 ```
 
-AIRD will fetch articles from your specified RSS feeds, filter them based on your interest tags, deduplicate, summarize, and then save the summaries in a file for your review.
 
 ## Future Works
 
@@ -75,6 +74,7 @@ AIRD is committed to continuous improvement and expansion. Here's a shortlist of
 - [ ] **GitHub Actions Support**: Integrating with GitHub Actions for automated runs, making AIRD more accessible and easier to deploy.
 - [ ] **Auto Tagging and Categorization**: Developing AI-driven features to automatically tag and categorize articles, refining content relevance.
 - [ ] **Performance Optimization**: Continual efforts to optimize code and processes for faster execution and lower resource consumption.
+- [ ] **Batch Processing**: Adding the ability to process tasks in batches for increased efficiency and scalability, reducing cost significantly.
 
 ## Contributing
 

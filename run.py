@@ -1,5 +1,7 @@
 import feedparser
 from openai import OpenAI
+import openai
+import random
 import os
 import json
 import time
@@ -183,30 +185,46 @@ def process_batch(tid, batch, summary_queue):
             if "查看全文" in article["summary"]
             else article["summary"]
         )
-        try:
-            response = client.chat.completions.create(
-                model=SUMMARY_MODEL,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a smart assistant that summarizes articles",
-                    },
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Exclude any references to author publicity and promotion and "
-                            f"the summary should be straightforward within 50 to 200 characters "
-                            f"in {RET_LANGUAGE}. Summarize the following:"
-                            + article_content
-                        ),
-                    },
-                ],
-                temperature=0.7,
-            )
-            summary_text = response.choices[0].message.content.strip()
-        except Exception as e:
-            print(f"An error occurred while summarizing the article: {e}")
-            summary_text = article_content
+        prompt_message = (
+            "You are a smart assistant that summarizes articles and finds the most relevant photo. "
+            "First, exclude any references to author publicity and promotion. The summary should be straightforward, "
+            "concise, within 50 to 200 characters in {RET_LANGUAGE}. Then, find a photo that best represents the main theme "
+            "or subject of the article. Return the summary and the photo link in Markdown format. "
+            "Summarize the following and include a relevant photo link:"
+            + article_content
+        )
+        attempt = 0
+        while attempt < 3:
+            try:
+                response = client.chat.completions.create(
+                    model=SUMMARY_MODEL,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": prompt_message,
+                        },
+                        {
+                            "role": "user",
+                            "content": article_content,
+                        },
+                    ],
+                    temperature=0.7,
+                )
+                summary_text = response.choices[0].message.content.strip()
+                break
+            except openai.error.RateLimitError:
+                time2sleep = random.randint(5, 10)
+                print(
+                    f"T-{tid}: Rate limit exceeded, waiting {time2sleep} seconds to retry..."
+                )
+                time.sleep(time2sleep)
+                attempt += 1
+            except Exception as e:
+                print(
+                    f"An error occurred while summarizing the article: {e}, using the original content."
+                )
+                summary_text = "Failed to summarize the article."
+                break
 
         summaries.append(
             f"### {article['title']}\n\n- **链接**: [{article['link']}]({article['link']})\n- **摘要**: {summary_text}\n\n"
@@ -257,7 +275,7 @@ def main():
 
     interested_articles = filter_by_interest(new_articles, interest_tags)
     num_articles = len(interested_articles)
-    if num_articles > 20:
+    if num_articles > 100:
         print(f"Too many articles ({num_articles}) matched the interest tags.")
         try:
             num_to_process = int(input("Enter the number of articles to process: "))
