@@ -224,22 +224,12 @@ def process_batch(tid, batch, summary_queue):
     print(f"T-{tid}: started processing a new batch...")
     start_t = time.time()
     for article in batch:
-        article_content = (
-            fetch_article_content(article["link"])
-            if "查看全文" in article["content"]
-            else article["content"]
-        )
-        if len(article_content) < 200:
-            summary = (
-                f"### {article['title']}\n\n"
-                f"- **链接**: [{article['link']}]({article['link']})\n"
-                f"- **短文**: {article_content}\n"
-            )
-            if article["image"]:
-                summary += f"- **图片**: ![]({article['image']})\n\n"
-            summaries.append(summary)
-            skipped_count += 1
-            continue
+        article_content = article["content"]
+        if article["link"] and len(article_content) < 200:
+            print(f"T-{tid}: Fetching article content from {article['link']}...")
+            article_content += fetch_article_content(article["link"])
+            print(f"New article is now {len(article_content)} characters long.")
+
         prompt_message = (
             "Exclude any references to author publicity and promotion and "
             "the summary should be straightforward within 50 to 200 characters "
@@ -270,7 +260,7 @@ def process_batch(tid, batch, summary_queue):
                     f"T-{tid}: Bad request error, skipping the article and using the original content."
                 )
                 summary_text = article_content[:200]
-                print(f"The malfunctioning prompt: {prompt_message}")
+                print(f"The malfunctioning article: {article['title']}")
                 skipped_count += 1
                 break
             except openai.RateLimitError:
@@ -287,6 +277,12 @@ def process_batch(tid, batch, summary_queue):
                 summary_text = "Failed to summarize the article."
                 skipped_count += 1
                 break
+        if attempt == 3:
+            print(
+                f"T-{tid}: Failed to summarize the article after 3 attempts, using the original content."
+            )
+            summary_text = article_content[:200]
+            skipped_count += 1
 
         summary = (
             f"### {article['title']}\n\n"
@@ -342,29 +338,28 @@ def main():
 
     interested_articles = filter_by_interest(new_articles, interest_tags)
     num_articles = len(interested_articles)
-    if num_articles > 100:
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    os.makedirs(daily_base_path, exist_ok=True)
+
+    summary_path = f"{daily_base_path}/{today}.md"
+
+    if num_articles > 64:
         print(f"Too many articles ({num_articles}) matched the interest tags.")
-        try:
-            num_to_process = int(input("Enter the number of articles to process: "))
-            if 0 < num_to_process <= num_articles:
-                interested_articles = interested_articles[:num_to_process]
-            else:
-                print(f"Please enter a number between 1 and {num_articles}.")
-        except ValueError:
-            print("Please enter a valid number. Program exited, please run again.")
-            return
+        for i in range(0, num_articles, 64):
+            assert 64 / PSIZE <= 16, "We only support 16 threads at most."
+            chunk = interested_articles[i : i + 64]
+            summary_content = generate_summary(chunk, summary_path)
     elif num_articles == 0:
         print("No articles matched the interest tags.")
         return
     else:
         print(f"{num_articles} articles matched the interest tags.")
+        assert (
+            len(interested_articles) / PSIZE <= 16
+        ), "We only support 16 threads at most."
+        summary_content = generate_summary(interested_articles, summary_path)
 
-    assert len(interested_articles) / PSIZE <= 16, "We only support 16 threads at most."
-    today = datetime.now().strftime("%Y-%m-%d")
-    os.makedirs(daily_base_path, exist_ok=True)
-
-    summary_path = f"{daily_base_path}/{today}.md"
-    summary_content = generate_summary(interested_articles, summary_path)
     print(f"Daily summary generated and saved to {summary_path}")
 
 
