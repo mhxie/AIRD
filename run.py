@@ -26,6 +26,7 @@ try:
     config = load_config()
     rss_urls = config["rss_urls"]
     interest_tags = config["interest_tags"]
+    noise_tags = config["noise_tags"]
     FILTER_MODEL = config["filter_model"]
     SUMMARY_MODEL = config["summary_model"]
     RET_LANGUAGE = config["language"]
@@ -82,6 +83,7 @@ def fetch_rss_articles(urls):
     """Fetches articles from the given RSS feed URLs."""
     articles = []
     count = 0
+    img_count = 0
     for url in urls:
         print(f"Fetching articles from {url}...")
         feed = feedparser.parse(url)
@@ -107,13 +109,18 @@ def fetch_rss_articles(urls):
             elif hasattr(entry, "description"):
                 article["content"] = entry.description
 
-            # Clean the HTML content
-            article["content"] = clean_html_content(article["content"])
+
             # Extracting the first image from the content
             article["image"] = find_the_first_image(article["content"])
+            # Clean the HTML content
+            article["content"] = clean_html_content(article["content"])
+            if article["image"]:
+                # print(f"Found image: {article['image']}")
+                img_count += 1
 
             articles.append(article)
             count += 1
+    print(f"Fetched {count} articles, {img_count} with images.")
     return articles
 
 
@@ -157,7 +164,7 @@ def extract_ids_from_response(response_text):
     return ids
 
 
-def filter_by_interest(articles, interest_tags):
+def filter_by_interest(articles, interest_tags, noise_tags):
     """Filters articles based on the user's interest tags. s"""
 
     def chunked_iterable(iterable, size):
@@ -173,8 +180,8 @@ def filter_by_interest(articles, interest_tags):
     for titles_chunk in chunked_iterable(list(title_id_map.keys()), BSIZE):
         prompt_titles = [f"{id}: {title_id_map[id]['title']}" for id in titles_chunk]
         print(f"Titles: {prompt_titles}")
-        prompt = "Filter titles by interest tags: {}\n\nTitles:\n{}\n".format(
-            interest_tags, "\n".join(prompt_titles)
+        prompt = "Filter titles by interest tags: {} and exclude by noise tags: {}\n\nTitles:\n{}\n".format(
+            interest_tags, noise_tags, "\n".join(prompt_titles)
         )
 
         try:
@@ -211,6 +218,11 @@ def filter_by_interest(articles, interest_tags):
     interested_articles = list(
         {article["id"]: article for article in interested_articles}.values()
     )
+    img_count = 0
+    for article in interested_articles:
+        if article["image"]:
+            img_count += 1
+    print(f"Filtered {len(interested_articles)} articles, {img_count} with images.")
 
     return interested_articles
 
@@ -336,7 +348,7 @@ def main():
         return
     store_hashed_titles(articles, db_path)
 
-    interested_articles = filter_by_interest(new_articles, interest_tags)
+    interested_articles = filter_by_interest(new_articles, interest_tags, noise_tags)
     num_articles = len(interested_articles)
 
     today = datetime.now().strftime("%Y-%m-%d")

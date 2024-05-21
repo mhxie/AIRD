@@ -53,6 +53,7 @@ To tailor AIRD to your preferences, edit the `config.json` file. Here's a quick 
 - **db_path**: Database file path for deduplication.
 - **rss_urls**: Active RSS feed URLs.
 - **interest_tags**: Your interest tags for article filtering.
+- **noise_tags**: Tags for articles to remove in article filtering.
 
 
 ### Running AIRD
@@ -68,13 +69,13 @@ python run.py
 
 AIRD is committed to continuous improvement and expansion. Here's a shortlist of planned enhancements:
 
-- [ ] **Better Link Reader**: Improving the mechanism for fetching and interpreting article content from various RSS feeds.
+- [x] **Better Link Reader**: Improving the mechanism for fetching and interpreting article content from various RSS feeds.
 - [ ] **Enhanced Configuration System**: Moving away from hardcoded configurations to a more dynamic and user-friendly setup process.
 - [x] **Higher Concurrency**: Implementing more concurrent processing to handle multiple feeds and operations simultaneously, enhancing efficiency.
 - [ ] **GitHub Actions Support**: Integrating with GitHub Actions for automated runs, making AIRD more accessible and easier to deploy.
 - [ ] **Auto Tagging and Categorization**: Developing AI-driven features to automatically tag and categorize articles, refining content relevance.
 - [ ] **Performance Optimization**: Continual efforts to optimize code and processes for faster execution and lower resource consumption.
-- [ ] **Batch Processing**: Adding the ability to process tasks in batches for increased efficiency and scalability, reducing cost significantly.
+- [x] **Batch Processing**: Adding the ability to process tasks in batches for increased efficiency and scalability, reducing cost significantly.
 
 ## Contributing
 
